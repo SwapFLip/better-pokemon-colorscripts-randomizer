@@ -1,286 +1,149 @@
-#!/bin/bash
+# Better Pokemon Colorscripts Randomizer
 
-# Cache file location
-CACHE_FILE="$HOME/.pokemon_forms_cache"
-CACHE_EXPIRY_DAYS=7  # Rebuild if older
+An intelligent Pokemon randomizer that showcases Pokemon with their alternate forms. Features smart weighted selection to give you variety while highlighting Pokemon with unique forms like regional variants, mega evolutions, and costume variations.
 
-# Invalid form to use for discovery
-INVALID_FORM="hi"
+## Quick Install
 
-# Function to extract forms from tool's output (confirmed working)
-extract_forms() {
-    local output="$1"
-    # Use awk: flexible trigger, handle blanks, collect - lines
-    local forms=$(echo "$output" | awk '
-    BEGIN { in_list = 0 }
-    /Invalid form/ { next }  # Skip invalid message
-    /[Aa]vailable.*[Ff]orms/ { in_list = 1; next }  # Flexible trigger (e.g., "Available alternate forms")
-    in_list {
-        if (/^$/) { next }  # Skip blank lines
-        if (/^- /) {
-            gsub(/^- /, "")  # Remove "- "
-            gsub(/^[ \t]+|[ \t]+$/, "")  # Trim
-            if ($0 != "" && $0 != "'$INVALID_FORM'" && $0 !~ /^(normal|default|base|standard|none)$/i) print $0
-        } else {
-            in_list = 0  # End on non-blank, non-list line
-        }
-    }
-    END { }
-    ' | sort -u | tr '\n' ':' | sed 's/:$//')  # Safe join
+```bash
+# Download and setup
+curl -O https://raw.githubusercontent.com/SwapFLip/better-pokemon-colorscripts-randomizer/main/randomizer.sh
+chmod +x randomizer.sh
 
-    if [ -n "$forms" ]; then
-        echo "$forms"
-    else
-        echo ""
-    fi
-}
+# Run it!
+./randomizer.sh
+```
 
-# Function to build/update cache (fixed arg handling)
-build_cache() {
-    local force="$1"
-    local debug_arg="$2"  # Positive number for limit, non-empty string for specific; empty/"0" = no debug
-    local quiet="$3"
-    local cache_age=0
-    local is_debug=0
-    local limit=""
-    local specific_poke=""
+## Prerequisites
 
-    # Handle debug arg: only if positive number or non-empty non-numeric (name)
-    if [ -n "$debug_arg" ] && [ "$debug_arg" != "0" ]; then
-        if [[ "$debug_arg" =~ ^[1-9][0-9]*$ ]]; then
-            is_debug=1
-            limit="$debug_arg"
-            [ -z "$quiet" ] && echo "DEBUG MODE: Querying only first $limit Pokémon with verbose output."
-        elif [ -n "$debug_arg" ]; then
-            is_debug=1
-            specific_poke="$debug_arg"
-            [ -z "$quiet" ] && echo "DEBUG MODE: Querying only specific Pokémon '$specific_poke' with verbose output."
-        fi
-    fi
+You need [pokemon-colorscripts](https://github.com/phonerebelx/pokemon-colorscripts) installed:
 
-    # Check if cache exists and is recent (skip in debug/force)
-    if [ "$is_debug" -eq 0 ] && [ -f "$CACHE_FILE" ] && [ ! "$force" = "force" ]; then
-        cache_age=$(( ($(date +%s) - $(date -r "$CACHE_FILE" +%s)) / 86400 ))
-        if [ "$cache_age" -lt "$CACHE_EXPIRY_DAYS" ]; then
-            [ -z "$quiet" ] && echo "Cache is fresh ($cache_age days old). Skipping build."
-            return 0
-        else
-            [ -z "$quiet" ] && echo "Cache is $cache_age days old (> $CACHE_EXPIRY_DAYS). Rebuilding..."
-        fi
-    fi
+```bash
+# Arch Linux / AUR
+yay -S pokemon-colorscripts-git
 
-    # Get all Pokémon names (robust: strip prefixes, lowercase)
-    local all_pokemon=$(pokemon-colorscripts -l 2>/dev/null | grep -v '^$' | sed 's/^[ \t]*[0-9]*[.)#: ]*//g; s/^[ \t]*//; s/[ \t]*$//; y/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/' | grep -v '^$')
+# Manual installation
+git clone https://github.com/phonerebelx/pokemon-colorscripts.git
+cd pokemon-colorscripts
+sudo ./install.sh
 
-    if [ -z "$all_pokemon" ]; then
-        echo "Error: Could not fetch Pokémon list. Run 'pokemon-colorscripts -l' manually to check (expect lowercase names)."
-        return 1
-    fi
+# Test it works
+pokemon-colorscripts -r
+```
 
-    # For specific debug
-    if [ -n "$specific_poke" ]; then
-        all_pokemon="$specific_poke"
-    else
-        # For limit debug
-        if [ "$is_debug" -eq 1 ] && [ -n "$limit" ]; then
-            all_pokemon=$(echo "$all_pokemon" | head -n "$limit")
-        fi
-    fi
+## Features
 
-    # Clear cache and add header
-    echo "# Forms cache built on $(date) (queried: $(echo "$all_pokemon" | wc -l))" > "$CACHE_FILE"
-    > "$CACHE_FILE.tmp"
+- **Smart Selection**: 50% random Pokemon, 45% Pokemon with forms, 5% shiny
+- **Auto-Caching**: Discovers and caches all Pokemon forms automatically  
+- **Fast Performance**: Instant after initial cache build
+- **Form Support**: Hat Pikachu, regional forms, megas, costumes, and more
+- **Debug Tools**: Built-in testing and troubleshooting commands
 
-    local count=0
-    local total=$(echo "$all_pokemon" | wc -l)
-    if [ "$is_debug" -eq 0 ]; then
-        [ -z "$quiet" ] && echo "Querying $total Pokémon for forms (5-10 minutes)..."
-    fi
+## Basic Usage
 
-    # Loop over Pokémon
-    local pokemon_list=($all_pokemon)
-    for i in "${!pokemon_list[@]}"; do
-        local pokemon="${pokemon_list[$i]}"
-        if [ -n "$pokemon" ]; then
-            count=$((count + 1))
-            if [ "$is_debug" -eq 0 ]; then
-                [ -z "$quiet" ] && echo -ne "Progress: $count/$total\r"
-            fi
+```bash
+# Show random Pokemon (auto-builds cache on first run ~5-10 min)
+./randomizer.sh
 
-            local output=$(pokemon-colorscripts -n "$pokemon" -f "$INVALID_FORM" 2>&1)
-            local forms=$(extract_forms "$output")
+# Force rebuild the forms cache  
+./randomizer.sh --build-cache
 
-            # Debug verbose
-            if [ "$is_debug" -eq 1 ]; then
-                echo "=== DEBUG: $((i+1)): $pokemon ==="
-                echo "Raw output:"
-                echo "$output"
-                echo "Extracted: '$forms'"
-                echo "----------------------------------------"
-                if [ -n "$forms" ]; then
-                    echo "SUCCESS: Forms found ($(echo "$forms" | tr ':' '\n' | wc -l) forms)!"
-                else
-                    echo "No forms (normal for this Pokémon)."
-                fi
-                echo ""
-            fi
+# Clear cache and start fresh
+./randomizer.sh --clear-cache
 
-            if [ -n "$forms" ]; then
-                echo "$pokemon:$forms" >> "$CACHE_FILE.tmp"
-            fi
-        fi
-    done
+# Show current cache contents
+./randomizer.sh --show-cache
+```
 
-    # Append data to cache
-    if [ -s "$CACHE_FILE.tmp" ]; then
-        cat "$CACHE_FILE.tmp" >> "$CACHE_FILE"
-        rm -f "$CACHE_FILE.tmp"
-    fi
+## Advanced Commands
 
-    local num_forms=$(tail -n +2 "$CACHE_FILE" 2>/dev/null | wc -l)
-    [ -z "$quiet" ] && echo ""
-    [ -z "$quiet" ] && echo "Build complete! Found $num_forms Pokémon with forms."
-    [ -z "$quiet" ] && [ "$num_forms" -gt 0 ] && echo "Sample: $(tail -n 1 "$CACHE_FILE")"
-    [ -z "$quiet" ] && [ "$num_forms" -eq 0 ] && echo "No forms found across queried Pokémon. If full build, check tool with --test-parse."
-}
+| Command | Description | Example |
+|---------|-------------|---------|
+| `--debug-build [N]` | Test cache building on first N Pokemon | `--debug-build 10` |
+| `--debug-build [name]` | Test specific Pokemon form detection | `--debug-build pikachu` |
+| `--test-parse [name]` | Debug form extraction for one Pokemon | `--test-parse charizard` |
+| `--quiet` | Silent mode (no progress messages) | `--quiet --build-cache` |
 
-# Function to load cache (FIXED: avoid subshell pipe issue)
-load_cache() {
-    local verbose="$1"
-    declare -gA POKEMON_FORMS
-    
-    if [ ! -f "$CACHE_FILE" ] || [ ! -s "$CACHE_FILE" ]; then
-        [ "$verbose" = "verbose" ] && echo "Cache missing or empty."
-        return 1
-    fi
+## How the Selection Works
 
-    local loaded_count=0
-    
-    # Use process substitution to avoid subshell
-    while IFS= read -r line; do
-        if [ -n "$line" ] && [[ "$line" != \#* ]]; then  # Skip comments/empties
-            local pokemon=$(echo "$line" | cut -d: -f1 | sed 's/^[ \t]*//;s/[ \t]*$//')
-            local forms=$(echo "$line" | cut -d: -f2- | sed 's/^[ \t]*//;s/[ \t]*$//')
-            if [ -n "$pokemon" ] && [ -n "$forms" ]; then
-                POKEMON_FORMS["$pokemon"]="$forms"
-                ((loaded_count++))
-            fi
-        fi
-    done < <(tail -n +2 "$CACHE_FILE" 2>/dev/null)
+The script uses weighted probabilities to ensure variety:
 
-    [ "$verbose" = "verbose" ]
-    if [ "$loaded_count" -eq 0 ] && [ "$verbose" = "verbose" ]; then
-        echo "Warning: 0 loaded (cache may be malformed). First few lines:"
-        head -n 5 "$CACHE_FILE"
-    fi
-    
-    return 0
-}
+- **50% - Pure Random**: Any Pokemon from the complete list
+- **45% - Form Showcase**: Randomly picks a Pokemon with alternate forms, then randomly picks one of its forms
+- **5% - Shiny Surprise**: Random shiny Pokemon
 
-# Function to test parsing for one Pokémon
-test_parse() {
-    local pokemon="$1"
-    if [ -z "$pokemon" ]; then
-        echo "Usage: --test-parse <pokemon> (e.g., pikachu)"
-        return 1
-    fi
-    local output=$(pokemon-colorscripts -n "$pokemon" -f "$INVALID_FORM" 2>&1)
-    echo "Raw output for $pokemon:"
-    echo "$output"
-    echo ""
-    local extracted=$(extract_forms "$output")
-    echo "Extracted forms: $extracted"
-    if [ -n "$extracted" ]; then
-        local count=$(echo "$extracted" | tr ':' '\n' | wc -l)
-        echo "Count: $count (expected ~16 for pikachu)"
-    else
-        echo "No forms found. If this is pikachu, share raw output for tweaks."
-    fi
-}
+This means Pokemon like Pikachu (16+ hat forms) and Alcremie (dozens of variants) get highlighted while still showing regular Pokemon frequently.
 
-# Handle commands
-case "$1" in
-    --build-cache|--full-build)
-        build_cache "force" "" "${2:-}"  # Full, no debug; quiet optional
-        exit 0
-        ;;
-    --debug-build)
-        build_cache "" "${2:-5}" ""  # Default 5, or specific/name
-        exit 0
-        ;;
-    --test-parse)
-        test_parse "$2"
-        exit 0
-        ;;
-    --show-cache)
-        if [ -f "$CACHE_FILE" ]; then
-            echo "Cache ($CACHE_FILE):"
-            head -n 1 "$CACHE_FILE"
-            tail -n +2 "$CACHE_FILE" | head -20
-            total=$(tail -n +2 "$CACHE_FILE" 2>/dev/null | wc -l)
-            [ "$total" -gt 20 ] && echo "... (total: $total)"
-        else
-            echo "No cache."
-        fi
-        exit 0
-        ;;
-    --clear-cache)
-        rm -f "$CACHE_FILE"
-        echo "Cache cleared."
-        exit 0
-        ;;
-    --quiet)
-        shift
-        QUIET_MODE=1
-        ;;
-    *)
-        # Main logic
-        ;;
-esac
+## Examples
 
-# Seed random
-RANDOM=$(date +%s)
+```bash
+# Basic usage
+./randomizer.sh
 
-# Declare the global associative array
-declare -gA POKEMON_FORMS
+# Silent cache rebuild
+./randomizer.sh --quiet --build-cache
 
-# Ensure/load cache with proper args (empty second for full query)
-if [ ! -f "$CACHE_FILE" ] || [ ! -s "$CACHE_FILE" ]; then
-    build_cache "" "" "${QUIET_MODE:-}"
-    load_cache "verbose"
-else
-    load_cache "silent"  # Silent load first to check
-    if [ ${#POKEMON_FORMS[@]} -eq 0 ]; then
-        echo "Cache exists but has 0 forms. Forcing full rebuild..."
-        build_cache "force" "" "${QUIET_MODE:-}"
-        load_cache "verbose"
-    else
-        load_cache "verbose"
-    fi
-fi
+# Test if Pikachu forms are detected correctly  
+./randomizer.sh --test-parse pikachu
 
-if [ ${#POKEMON_FORMS[@]} -eq 0 ]; then
-    echo "Still no forms after rebuild. Run --debug-build 20 to check."
-    pokemon-colorscripts --no-title  -r
-    exit 0
-fi
+# Debug first 20 Pokemon with detailed output
+./randomizer.sh --debug-build 20
+```
 
-# Get Pokémon with forms
-pokemons_with_forms=("${!POKEMON_FORMS[@]}")
+## Troubleshooting
 
-# Random selection (only if forms available)
-percent=$((RANDOM % 100))
+### Script Won't Execute
+```bash
+# Make sure it's executable
+chmod +x randomizer.sh
 
-if [ $percent -lt 50 ]; then
-    pokemon-colorscripts --no-title  -r
-elif [ $percent -lt 95 ]; then
-    random_poke_index=$((RANDOM % ${#pokemons_with_forms[@]}))
-    selected_poke="${pokemons_with_forms[$random_poke_index]}"
-    forms_list="${POKEMON_FORMS[$selected_poke]}"
-    IFS=':' read -ra forms <<< "$forms_list"
-    random_form_index=$((RANDOM % ${#forms[@]}))
-    selected_form="${forms[$random_form_index]}"
-    pokemon-colorscripts --no-title  -n "$selected_poke" -f "$selected_form"
-else
-    pokemon-colorscripts --no-title -r -s
-fi
+# Check if pokemon-colorscripts is installed
+which pokemon-colorscripts
+pokemon-colorscripts -r
+```
+
+### Cache Issues
+```bash
+# Cache seems broken or empty
+./randomizer.sh --clear-cache
+./randomizer.sh --build-cache
+
+# Test form parsing works
+./randomizer.sh --test-parse pikachu
+```
+
+### No Forms Found
+```bash
+# Debug with verbose output
+./randomizer.sh --debug-build 5
+
+# Test known Pokemon with forms
+./randomizer.sh --test-parse pikachu
+./randomizer.sh --test-parse charizard
+```
+
+### Performance Notes
+- **First run**: 5-10 minutes to scan all Pokemon (one-time setup)
+- **Daily usage**: Nearly instant execution
+- **Cache location**: `~/.pokemon_forms_cache`
+- **Auto-refresh**: Cache rebuilds after 7 days
+
+## What Pokemon Have Forms?
+As of now, 181 pokemon has forms in the original
+
+## Optional: Add to PATH
+
+```bash
+# Method 1: System-wide
+sudo mv randomizer.sh /usr/local/bin/pokemon-randomizer
+
+# Method 2: User-specific  
+mkdir -p ~/.local/bin
+ln -s "$(pwd)/randomizer.sh" ~/.local/bin/pokemon-randomizer
+
+# Then use anywhere:
+pokemon-randomizer
+```
+
+---
+
+**Built on** [pokemon-colorscripts](https://github.com/phonerebelx/pokemon-colorscripts) **by phonerebelx**
